@@ -1,0 +1,1160 @@
+
+# Guide de développement Backend Spring Boot pour ComptaNova
+# Solution comptable compatible France et Tunisie
+
+## Architecture - Entités vs Vues
+
+### Entités principales (Tables persistées)
+```java
+// User.java - Entité de base utilisateur
+@Entity
+@Table(name = "users")
+public class User {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(unique = true, nullable = false)
+    private String email;
+    
+    @Column(nullable = false)
+    private String password;
+    
+    @Column(nullable = false)
+    private String firstName;
+    
+    @Column(nullable = false)
+    private String lastName;
+    
+    @Enumerated(EnumType.STRING)
+    private UserRole role;
+    
+    @Column(nullable = false)
+    private Boolean active = true;
+    
+    @Column(nullable = false)
+    private Long companyId;
+    
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+    
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
+    
+    // getters, setters, constructors
+}
+
+// Company.java - Entité Entreprise
+@Entity
+@Table(name = "companies")
+public class Company {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false)
+    private String name;
+    
+    @Column(nullable = false)
+    private String address;
+    
+    @Column(nullable = false)
+    private String city;
+    
+    @Column(nullable = false)
+    private String postalCode;
+    
+    @Column(nullable = false)
+    private String country;
+    
+    private String siret; // Pour France
+    private String matriculeFiscal; // Pour Tunisie
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private AccountingSystem accountingSystem;
+    
+    @Column(nullable = false)
+    private String industry;
+    
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+    
+    // getters, setters
+}
+
+// AccountType.java - Table des types de comptes
+@Entity
+@Table(name = "account_types")
+public class AccountType {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false, unique = true)
+    private String code; // ACTIF, PASSIF, CHARGE, PRODUIT
+    
+    @Column(nullable = false)
+    private String name;
+    
+    @Column(nullable = false)
+    private String description;
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private AccountingSystem accountingSystem;
+    
+    // getters, setters
+}
+
+// Account.java - Entité Compte
+@Entity
+@Table(name = "accounts")
+public class Account {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false, unique = true)
+    private String code;
+    
+    @Column(nullable = false)
+    private String name;
+    
+    @Column(nullable = false)
+    private Long companyId;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "account_type_id", nullable = false)
+    private AccountType accountType;
+    
+    @Column(nullable = false)
+    private String category;
+    
+    @Column(nullable = false)
+    private Boolean isVatAccount = false;
+    
+    private BigDecimal vatRate;
+    
+    @Column(nullable = false)
+    private Boolean isAnalytic = false;
+    
+    private String parentAccount;
+    private String description;
+    
+    @Column(nullable = false)
+    private Boolean active = true;
+    
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+    
+    // getters, setters
+}
+
+// JournalEntry.java - Entité Écriture comptable
+@Entity
+@Table(name = "journal_entries")
+public class JournalEntry {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @Column(nullable = false)
+    private String reference;
+    
+    @Column(nullable = false)
+    private LocalDate entryDate;
+    
+    @Column(nullable = false)
+    private String description;
+    
+    @Column(nullable = false)
+    private Long companyId;
+    
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private JournalType journalType;
+    
+    @Column(nullable = false)
+    private BigDecimal totalDebit;
+    
+    @Column(nullable = false)
+    private BigDecimal totalCredit;
+    
+    @Column(nullable = false)
+    private Boolean balanced = false;
+    
+    @Column(nullable = false)
+    private Boolean validated = false;
+    
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+    
+    @OneToMany(mappedBy = "journalEntry", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    private List<JournalEntryLine> lines = new ArrayList<>();
+    
+    // getters, setters
+}
+
+// JournalEntryLine.java - Lignes d'écriture
+@Entity
+@Table(name = "journal_entry_lines")
+public class JournalEntryLine {
+    @Id
+    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    private Long id;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "journal_entry_id", nullable = false)
+    private JournalEntry journalEntry;
+    
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "account_id", nullable = false)
+    private Account account;
+    
+    @Column(nullable = false)
+    private String description;
+    
+    @Column(precision = 15, scale = 2)
+    private BigDecimal debitAmount = BigDecimal.ZERO;
+    
+    @Column(precision = 15, scale = 2)
+    private BigDecimal creditAmount = BigDecimal.ZERO;
+    
+    private String reference;
+    private String analyticCode;
+    
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+    
+    // getters, setters
+}
+```
+
+### Vues/DTOs (Calculées, non persistées)
+```java
+// TrialBalanceItem.java - Vue Balance générale
+public class TrialBalanceItem {
+    private String accountCode;
+    private String accountName;
+    private BigDecimal debitBalance;
+    private BigDecimal creditBalance;
+    private BigDecimal netBalance;
+    private String accountType;
+    
+    // Constructeur pour projection JPA
+    public TrialBalanceItem(String accountCode, String accountName, 
+                           BigDecimal debitBalance, BigDecimal creditBalance, 
+                           String accountType) {
+        this.accountCode = accountCode;
+        this.accountName = accountName;
+        this.debitBalance = debitBalance;
+        this.creditBalance = creditBalance;
+        this.netBalance = debitBalance.subtract(creditBalance);
+        this.accountType = accountType;
+    }
+    
+    // getters, setters
+}
+
+// ProfitLossItem.java - Vue Compte de résultat
+public class ProfitLossItem {
+    private String category;
+    private String accountCode;
+    private String accountName;
+    private BigDecimal amount;
+    private String type; // CHARGE ou PRODUIT
+    
+    // Constructeur
+    public ProfitLossItem(String category, String accountCode, 
+                         String accountName, BigDecimal amount, String type) {
+        this.category = category;
+        this.accountCode = accountCode;
+        this.accountName = accountName;
+        this.amount = amount;
+        this.type = type;
+    }
+    
+    // getters, setters
+}
+
+// BalanceSheetItem.java - Vue Bilan
+public class BalanceSheetItem {
+    private String section; // ACTIF, PASSIF
+    private String category;
+    private String accountCode;
+    private String accountName;
+    private BigDecimal amount;
+    private Integer displayOrder;
+    
+    // Constructeur
+    public BalanceSheetItem(String section, String category, String accountCode, 
+                           String accountName, BigDecimal amount, Integer displayOrder) {
+        this.section = section;
+        this.category = category;
+        this.accountCode = accountCode;
+        this.accountName = accountName;
+        this.amount = amount;
+        this.displayOrder = displayOrder;
+    }
+    
+    // getters, setters
+}
+
+// AccountEntry.java - Vue Entrées de compte
+public class AccountEntry {
+    private Long id;
+    private LocalDate entryDate;
+    private String reference;
+    private String description;
+    private BigDecimal debitAmount;
+    private BigDecimal creditAmount;
+    private BigDecimal runningBalance;
+    private String journalType;
+    
+    // Constructeur
+    public AccountEntry(Long id, LocalDate entryDate, String reference, 
+                       String description, BigDecimal debitAmount, 
+                       BigDecimal creditAmount, String journalType) {
+        this.id = id;
+        this.entryDate = entryDate;
+        this.reference = reference;
+        this.description = description;
+        this.debitAmount = debitAmount;
+        this.creditAmount = creditAmount;
+        this.journalType = journalType;
+        // runningBalance sera calculé dans le service
+    }
+    
+    // getters, setters
+}
+
+// SystemUser.java - Extension de User pour la gestion système
+public class SystemUser extends User {
+    private String displayName;
+    private String companyName;
+    private List<String> permissions;
+    private AccountingSystem accountingSystem;
+    
+    // Constructeur basé sur User et Company
+    public SystemUser(User user, Company company) {
+        super();
+        this.setId(user.getId());
+        this.setEmail(user.getEmail());
+        this.setFirstName(user.getFirstName());
+        this.setLastName(user.getLastName());
+        this.setRole(user.getRole());
+        this.setActive(user.getActive());
+        this.setCompanyId(user.getCompanyId());
+        
+        this.displayName = user.getFirstName() + " " + user.getLastName();
+        this.companyName = company.getName();
+        this.accountingSystem = company.getAccountingSystem();
+        this.permissions = generatePermissions(user.getRole());
+    }
+    
+    private List<String> generatePermissions(UserRole role) {
+        // Logique de génération des permissions selon le rôle
+        switch (role) {
+            case DIRIGENT:
+                return Arrays.asList("READ_ALL", "WRITE_ALL", "DELETE_ALL", "ADMIN");
+            case COMPTABLE:
+                return Arrays.asList("READ_ACCOUNTING", "WRITE_ACCOUNTING", "READ_REPORTS");
+            case CAISSIER:
+                return Arrays.asList("READ_CASH", "WRITE_CASH");
+            default:
+                return Arrays.asList("READ_BASIC");
+        }
+    }
+    
+    // getters, setters
+}
+```
+
+### Énumérations
+```java
+// AccountingSystem.java
+public enum AccountingSystem {
+    PCG_FRANCE("Plan Comptable Général - France"),
+    SYSCOA_TUNISIA("Système Comptable des Entreprises - Tunisie");
+    
+    private final String displayName;
+    
+    AccountingSystem(String displayName) {
+        this.displayName = displayName;
+    }
+    
+    public String getDisplayName() {
+        return displayName;
+    }
+}
+
+// UserRole.java
+public enum UserRole {
+    DIRIGENT, COMPTABLE, CAISSIER, ADMIN
+}
+
+// JournalType.java
+public enum JournalType {
+    VENTE("VT", "Journal des ventes"),
+    ACHAT("AC", "Journal des achats"),
+    BANQUE("BQ", "Journal de banque"),
+    CAISSE("CA", "Journal de caisse"),
+    OD("OD", "Opérations diverses");
+    
+    private final String code;
+    private final String description;
+    
+    JournalType(String code, String description) {
+        this.code = code;
+        this.description = description;
+    }
+    
+    // getters
+}
+```
+
+### Repositories pour les vues
+```java
+// TrialBalanceRepository.java
+@Repository
+public interface TrialBalanceRepository extends JpaRepository<Account, Long> {
+    
+    @Query("""
+        SELECT new com.comptanova.dto.TrialBalanceItem(
+            a.code,
+            a.name,
+            COALESCE(SUM(jel.debitAmount), 0),
+            COALESCE(SUM(jel.creditAmount), 0),
+            at.code
+        )
+        FROM Account a
+        LEFT JOIN JournalEntryLine jel ON jel.account = a
+        LEFT JOIN JournalEntry je ON jel.journalEntry = je
+        LEFT JOIN a.accountType at
+        WHERE a.companyId = :companyId
+        AND (:startDate IS NULL OR je.entryDate >= :startDate)
+        AND (:endDate IS NULL OR je.entryDate <= :endDate)
+        AND je.validated = true
+        GROUP BY a.code, a.name, at.code
+        ORDER BY a.code
+        """)
+    List<TrialBalanceItem> findTrialBalance(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+}
+
+// ProfitLossRepository.java
+@Repository
+public interface ProfitLossRepository extends JpaRepository<Account, Long> {
+    
+    @Query("""
+        SELECT new com.comptanova.dto.ProfitLossItem(
+            a.category,
+            a.code,
+            a.name,
+            CASE 
+                WHEN at.code = 'CHARGE' THEN COALESCE(SUM(jel.debitAmount - jel.creditAmount), 0)
+                WHEN at.code = 'PRODUIT' THEN COALESCE(SUM(jel.creditAmount - jel.debitAmount), 0)
+                ELSE 0
+            END,
+            at.code
+        )
+        FROM Account a
+        LEFT JOIN JournalEntryLine jel ON jel.account = a
+        LEFT JOIN JournalEntry je ON jel.journalEntry = je
+        LEFT JOIN a.accountType at
+        WHERE a.companyId = :companyId
+        AND je.entryDate BETWEEN :startDate AND :endDate
+        AND je.validated = true
+        AND at.code IN ('CHARGE', 'PRODUIT')
+        GROUP BY a.category, a.code, a.name, at.code
+        HAVING ABS(SUM(CASE 
+            WHEN at.code = 'CHARGE' THEN jel.debitAmount - jel.creditAmount
+            WHEN at.code = 'PRODUIT' THEN jel.creditAmount - jel.debitAmount
+            ELSE 0
+        END)) > 0
+        ORDER BY at.code, a.code
+        """)
+    List<ProfitLossItem> findProfitLossItems(
+        @Param("companyId") Long companyId,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+}
+
+// BalanceSheetRepository.java
+@Repository
+public interface BalanceSheetRepository extends JpaRepository<Account, Long> {
+    
+    @Query("""
+        SELECT new com.comptanova.dto.BalanceSheetItem(
+            CASE 
+                WHEN at.code = 'ACTIF' THEN 'ACTIF'
+                WHEN at.code = 'PASSIF' THEN 'PASSIF'
+                ELSE 'AUTRE'
+            END,
+            a.category,
+            a.code,
+            a.name,
+            CASE 
+                WHEN at.code = 'ACTIF' THEN COALESCE(SUM(jel.debitAmount - jel.creditAmount), 0)
+                WHEN at.code = 'PASSIF' THEN COALESCE(SUM(jel.creditAmount - jel.debitAmount), 0)
+                ELSE 0
+            END,
+            CASE a.category
+                WHEN 'immobilisations' THEN 1
+                WHEN 'stocks' THEN 2
+                WHEN 'clients' THEN 3
+                WHEN 'tresorerie' THEN 4
+                WHEN 'capitaux' THEN 5
+                WHEN 'provisions' THEN 6
+                WHEN 'fournisseurs' THEN 7
+                ELSE 8
+            END
+        )
+        FROM Account a
+        LEFT JOIN JournalEntryLine jel ON jel.account = a
+        LEFT JOIN JournalEntry je ON jel.journalEntry = je
+        LEFT JOIN a.accountType at
+        WHERE a.companyId = :companyId
+        AND je.entryDate <= :asOfDate
+        AND je.validated = true
+        AND at.code IN ('ACTIF', 'PASSIF')
+        GROUP BY a.category, a.code, a.name, at.code
+        HAVING ABS(SUM(CASE 
+            WHEN at.code = 'ACTIF' THEN jel.debitAmount - jel.creditAmount
+            WHEN at.code = 'PASSIF' THEN jel.creditAmount - jel.debitAmount
+            ELSE 0
+        END)) > 0
+        ORDER BY 
+            CASE WHEN at.code = 'ACTIF' THEN 1 ELSE 2 END,
+            CASE a.category
+                WHEN 'immobilisations' THEN 1
+                WHEN 'stocks' THEN 2
+                WHEN 'clients' THEN 3
+                WHEN 'tresorerie' THEN 4
+                WHEN 'capitaux' THEN 5
+                WHEN 'provisions' THEN 6
+                WHEN 'fournisseurs' THEN 7
+                ELSE 8
+            END,
+            a.code
+        """)
+    List<BalanceSheetItem> findBalanceSheetItems(
+        @Param("companyId") Long companyId,
+        @Param("asOfDate") LocalDate asOfDate
+    );
+}
+
+// AccountEntryRepository.java
+@Repository
+public interface AccountEntryRepository extends JpaRepository<JournalEntryLine, Long> {
+    
+    @Query("""
+        SELECT new com.comptanova.dto.AccountEntry(
+            jel.id,
+            je.entryDate,
+            je.reference,
+            jel.description,
+            jel.debitAmount,
+            jel.creditAmount,
+            je.journalType
+        )
+        FROM JournalEntryLine jel
+        JOIN jel.journalEntry je
+        WHERE jel.account.id = :accountId
+        AND je.validated = true
+        AND (:startDate IS NULL OR je.entryDate >= :startDate)
+        AND (:endDate IS NULL OR je.entryDate <= :endDate)
+        ORDER BY je.entryDate, jel.id
+        """)
+    List<AccountEntry> findAccountEntries(
+        @Param("accountId") Long accountId,
+        @Param("startDate") LocalDate startDate,
+        @Param("endDate") LocalDate endDate
+    );
+}
+```
+
+### Services
+```java
+// UserService.java
+@Service
+@Transactional
+public class UserService {
+    
+    @Autowired
+    private UserRepository userRepository;
+    
+    @Autowired
+    private CompanyRepository companyRepository;
+    
+    @Autowired
+    private PasswordEncoder passwordEncoder;
+    
+    public SystemUser createUser(CreateUserRequest request) {
+        User user = new User();
+        user.setEmail(request.getEmail());
+        user.setPassword(passwordEncoder.encode(request.getPassword()));
+        user.setFirstName(request.getFirstName());
+        user.setLastName(request.getLastName());
+        user.setRole(request.getRole());
+        user.setCompanyId(request.getCompanyId());
+        
+        User savedUser = userRepository.save(user);
+        Company company = companyRepository.findById(request.getCompanyId())
+            .orElseThrow(() -> new EntityNotFoundException("Company not found"));
+            
+        return new SystemUser(savedUser, company);
+    }
+    
+    public SystemUser findByEmail(String email) {
+        User user = userRepository.findByEmail(email)
+            .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        Company company = companyRepository.findById(user.getCompanyId())
+            .orElseThrow(() -> new EntityNotFoundException("Company not found"));
+            
+        return new SystemUser(user, company);
+    }
+    
+    public List<SystemUser> findByCompanyId(Long companyId) {
+        List<User> users = userRepository.findByCompanyId(companyId);
+        Company company = companyRepository.findById(companyId)
+            .orElseThrow(() -> new EntityNotFoundException("Company not found"));
+            
+        return users.stream()
+            .map(user -> new SystemUser(user, company))
+            .collect(Collectors.toList());
+    }
+    
+    // autres méthodes...
+}
+
+// ReportService.java
+@Service
+public class ReportService {
+    
+    @Autowired
+    private TrialBalanceRepository trialBalanceRepository;
+    
+    @Autowired
+    private ProfitLossRepository profitLossRepository;
+    
+    @Autowired
+    private BalanceSheetRepository balanceSheetRepository;
+    
+    @Autowired
+    private AccountEntryRepository accountEntryRepository;
+    
+    public List<TrialBalanceItem> generateTrialBalance(Long companyId, LocalDate startDate, LocalDate endDate) {
+        return trialBalanceRepository.findTrialBalance(companyId, startDate, endDate);
+    }
+    
+    public List<ProfitLossItem> generateProfitLoss(Long companyId, LocalDate startDate, LocalDate endDate) {
+        List<ProfitLossItem> items = profitLossRepository.findProfitLossItems(companyId, startDate, endDate);
+        
+        // Calcul des totaux
+        BigDecimal totalCharges = items.stream()
+            .filter(item -> "CHARGE".equals(item.getType()))
+            .map(ProfitLossItem::getAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+            
+        BigDecimal totalProduits = items.stream()
+            .filter(item -> "PRODUIT".equals(item.getType()))
+            .map(ProfitLossItem::getAmount)
+            .reduce(BigDecimal.ZERO, BigDecimal::add);
+            
+        BigDecimal resultat = totalProduits.subtract(totalCharges);
+        
+        // Ajouter la ligne de résultat
+        items.add(new ProfitLossItem("RESULTAT", "", 
+            resultat.compareTo(BigDecimal.ZERO) >= 0 ? "Bénéfice" : "Perte", 
+            resultat.abs(), 
+            resultat.compareTo(BigDecimal.ZERO) >= 0 ? "PRODUIT" : "CHARGE"));
+            
+        return items;
+    }
+    
+    public List<BalanceSheetItem> generateBalanceSheet(Long companyId, LocalDate asOfDate) {
+        return balanceSheetRepository.findBalanceSheetItems(companyId, asOfDate);
+    }
+    
+    public List<AccountEntry> getAccountEntries(Long accountId, LocalDate startDate, LocalDate endDate) {
+        List<AccountEntry> entries = accountEntryRepository.findAccountEntries(accountId, startDate, endDate);
+        
+        // Calcul du solde progressif
+        BigDecimal runningBalance = BigDecimal.ZERO;
+        for (AccountEntry entry : entries) {
+            runningBalance = runningBalance.add(entry.getDebitAmount()).subtract(entry.getCreditAmount());
+            entry.setRunningBalance(runningBalance);
+        }
+        
+        return entries;
+    }
+}
+```
+
+### Contrôleurs
+```java
+// UserController.java
+@RestController
+@RequestMapping("/api/users")
+@CrossOrigin(origins = {"http://localhost:5173", "https://comptanova.lovable.app"})
+public class UserController {
+    
+    @Autowired
+    private UserService userService;
+    
+    @PostMapping
+    public ResponseEntity<SystemUser> createUser(@RequestBody CreateUserRequest request) {
+        SystemUser user = userService.createUser(request);
+        return ResponseEntity.ok(user);
+    }
+    
+    @GetMapping("/{id}")
+    public ResponseEntity<SystemUser> getUser(@PathVariable Long id) {
+        SystemUser user = userService.findById(id);
+        return ResponseEntity.ok(user);
+    }
+    
+    @GetMapping("/company/{companyId}")
+    public ResponseEntity<List<SystemUser>> getUsersByCompany(@PathVariable Long companyId) {
+        List<SystemUser> users = userService.findByCompanyId(companyId);
+        return ResponseEntity.ok(users);
+    }
+    
+    @GetMapping("/me")
+    public ResponseEntity<SystemUser> getCurrentUser(Authentication authentication) {
+        SystemUser user = userService.findByEmail(authentication.getName());
+        return ResponseEntity.ok(user);
+    }
+    
+    // autres endpoints...
+}
+
+// ReportController.java
+@RestController
+@RequestMapping("/api/reports")
+@CrossOrigin(origins = {"http://localhost:5173", "https://comptanova.lovable.app"})
+public class ReportController {
+    
+    @Autowired
+    private ReportService reportService;
+    
+    @GetMapping("/trial-balance")
+    public ResponseEntity<List<TrialBalanceItem>> getTrialBalance(
+            @RequestParam Long companyId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        
+        List<TrialBalanceItem> trialBalance = reportService.generateTrialBalance(companyId, startDate, endDate);
+        return ResponseEntity.ok(trialBalance);
+    }
+    
+    @GetMapping("/profit-loss")
+    public ResponseEntity<List<ProfitLossItem>> getProfitLoss(
+            @RequestParam Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        
+        List<ProfitLossItem> profitLoss = reportService.generateProfitLoss(companyId, startDate, endDate);
+        return ResponseEntity.ok(profitLoss);
+    }
+    
+    @GetMapping("/balance-sheet")
+    public ResponseEntity<List<BalanceSheetItem>> getBalanceSheet(
+            @RequestParam Long companyId,
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate asOfDate) {
+        
+        List<BalanceSheetItem> balanceSheet = reportService.generateBalanceSheet(companyId, asOfDate);
+        return ResponseEntity.ok(balanceSheet);
+    }
+    
+    @GetMapping("/account-entries")
+    public ResponseEntity<List<AccountEntry>> getAccountEntries(
+            @RequestParam Long accountId,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
+        
+        List<AccountEntry> entries = reportService.getAccountEntries(accountId, startDate, endDate);
+        return ResponseEntity.ok(entries);
+    }
+}
+```
+
+### Authentification JWT complète
+```java
+// JwtUtil.java
+@Component
+public class JwtUtil {
+    
+    @Value("${jwt.secret}")
+    private String jwtSecret;
+    
+    @Value("${jwt.expiration}")
+    private int jwtExpirationMs;
+    
+    public String generateJwtToken(SystemUser userPrincipal) {
+        return generateTokenFromUsername(userPrincipal.getEmail());
+    }
+    
+    public String generateTokenFromUsername(String username) {
+        return Jwts.builder()
+                .setSubject(username)
+                .setIssuedAt(new Date())
+                .setExpiration(new Date((new Date()).getTime() + jwtExpirationMs))
+                .signWith(SignatureAlgorithm.HS512, jwtSecret)
+                .compact();
+    }
+    
+    public String getUserNameFromJwtToken(String token) {
+        return Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(token).getBody().getSubject();
+    }
+    
+    public boolean validateJwtToken(String authToken) {
+        try {
+            Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(authToken);
+            return true;
+        } catch (SignatureException e) {
+            logger.error("Invalid JWT signature: {}", e.getMessage());
+        } catch (MalformedJwtException e) {
+            logger.error("Invalid JWT token: {}", e.getMessage());
+        } catch (ExpiredJwtException e) {
+            logger.error("JWT token is expired: {}", e.getMessage());
+        } catch (UnsupportedJwtException e) {
+            logger.error("JWT token is unsupported: {}", e.getMessage());
+        } catch (IllegalArgumentException e) {
+            logger.error("JWT claims string is empty: {}", e.getMessage());
+        }
+        return false;
+    }
+    
+    private static final Logger logger = LoggerFactory.getLogger(JwtUtil.class);
+}
+
+// UserDetailsServiceImpl.java
+@Service
+public class UserDetailsServiceImpl implements UserDetailsService {
+    
+    @Autowired
+    private UserService userService;
+    
+    @Override
+    @Transactional
+    public UserDetails loadUserByUsername(String email) throws UsernameNotFoundException {
+        SystemUser user = userService.findByEmail(email);
+        return UserPrincipal.create(user);
+    }
+}
+
+// UserPrincipal.java
+public class UserPrincipal implements UserDetails {
+    private Long id;
+    private String email;
+    private String password;
+    private Collection<? extends GrantedAuthority> authorities;
+    
+    public UserPrincipal(Long id, String email, String password, 
+                        Collection<? extends GrantedAuthority> authorities) {
+        this.id = id;
+        this.email = email;
+        this.password = password;
+        this.authorities = authorities;
+    }
+    
+    public static UserPrincipal create(SystemUser user) {
+        List<GrantedAuthority> authorities = user.getPermissions().stream()
+                .map(permission -> new SimpleGrantedAuthority("ROLE_" + permission))
+                .collect(Collectors.toList());
+        
+        return new UserPrincipal(
+            user.getId(),
+            user.getEmail(),
+            user.getPassword(),
+            authorities
+        );
+    }
+    
+    @Override
+    public Collection<? extends GrantedAuthority> getAuthorities() {
+        return authorities;
+    }
+    
+    @Override
+    public String getPassword() {
+        return password;
+    }
+    
+    @Override
+    public String getUsername() {
+        return email;
+    }
+    
+    @Override
+    public boolean isAccountNonExpired() {
+        return true;
+    }
+    
+    @Override
+    public boolean isAccountNonLocked() {
+        return true;
+    }
+    
+    @Override
+    public boolean isCredentialsNonExpired() {
+        return true;
+    }
+    
+    @Override
+    public boolean isEnabled() {
+        return true;
+    }
+    
+    public Long getId() {
+        return id;
+    }
+    
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (o == null || getClass() != o.getClass()) return false;
+        UserPrincipal that = (UserPrincipal) o;
+        return Objects.equals(id, that.id);
+    }
+    
+    @Override
+    public int hashCode() {
+        return Objects.hash(id);
+    }
+}
+
+// AuthTokenFilter.java
+public class AuthTokenFilter extends OncePerRequestFilter {
+    
+    @Autowired
+    private JwtUtil jwtUtils;
+    
+    @Autowired
+    private UserDetailsServiceImpl userDetailsService;
+    
+    private static final Logger logger = LoggerFactory.getLogger(AuthTokenFilter.class);
+    
+    @Override
+    protected void doFilterInternal(HttpServletRequest request, HttpServletResponse response, 
+                                   FilterChain filterChain) throws ServletException, IOException {
+        try {
+            String jwt = parseJwt(request);
+            if (jwt != null && jwtUtils.validateJwtToken(jwt)) {
+                String username = jwtUtils.getUserNameFromJwtToken(jwt);
+                
+                UserDetails userDetails = userDetailsService.loadUserByUsername(username);
+                UsernamePasswordAuthenticationToken authentication = 
+                    new UsernamePasswordAuthenticationToken(userDetails, null, userDetails.getAuthorities());
+                authentication.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
+                
+                SecurityContextHolder.getContext().setAuthentication(authentication);
+            }
+        } catch (Exception e) {
+            logger.error("Cannot set user authentication: {}", e);
+        }
+        
+        filterChain.doFilter(request, response);
+    }
+    
+    private String parseJwt(HttpServletRequest request) {
+        String headerAuth = request.getHeader("Authorization");
+        
+        if (StringUtils.hasText(headerAuth) && headerAuth.startsWith("Bearer ")) {
+            return headerAuth.substring(7);
+        }
+        
+        return null;
+    }
+}
+
+// AuthController.java
+@RestController
+@RequestMapping("/api/auth")
+@CrossOrigin(origins = {"http://localhost:5173", "https://comptanova.lovable.app"})
+public class AuthController {
+    
+    @Autowired
+    private AuthenticationManager authenticationManager;
+    
+    @Autowired
+    private UserService userService;
+    
+    @Autowired
+    private CompanyService companyService;
+    
+    @Autowired
+    private JwtUtil jwtUtils;
+    
+    @PostMapping("/signin")
+    public ResponseEntity<?> authenticateUser(@Valid @RequestBody LoginRequest loginRequest) {
+        
+        Authentication authentication = authenticationManager.authenticate(
+            new UsernamePasswordAuthenticationToken(loginRequest.getEmail(), loginRequest.getPassword()));
+        
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        String jwt = jwtUtils.generateJwtToken((UserPrincipal) authentication.getPrincipal());
+        
+        UserPrincipal userPrincipal = (UserPrincipal) authentication.getPrincipal();
+        SystemUser user = userService.findByEmail(userPrincipal.getUsername());
+        
+        return ResponseEntity.ok(new JwtResponse(jwt, user));
+    }
+    
+    @PostMapping("/signup")
+    public ResponseEntity<?> registerUser(@Valid @RequestBody SignUpRequest signUpRequest) {
+        if (userService.existsByEmail(signUpRequest.getEmail())) {
+            return ResponseEntity.badRequest()
+                .body(new MessageResponse("Erreur: L'email est déjà utilisé!"));
+        }
+        
+        // Créer l'entreprise
+        Company company = companyService.createCompany(signUpRequest);
+        
+        // Créer l'utilisateur dirigeant
+        CreateUserRequest userRequest = new CreateUserRequest();
+        userRequest.setEmail(signUpRequest.getEmail());
+        userRequest.setPassword(signUpRequest.getPassword());
+        userRequest.setFirstName(signUpRequest.getFirstName());
+        userRequest.setLastName(signUpRequest.getLastName());
+        userRequest.setRole(UserRole.DIRIGENT);
+        userRequest.setCompanyId(company.getId());
+        
+        SystemUser user = userService.createUser(userRequest);
+        
+        // Initialiser le plan comptable selon le système choisi
+        companyService.initializeChartOfAccounts(company.getId(), company.getAccountingSystem());
+        
+        return ResponseEntity.ok(new MessageResponse("Utilisateur et entreprise créés avec succès!"));
+    }
+}
+```
+
+### Configuration Docker
+```yaml
+# docker-compose.yml
+version: '3.8'
+
+services:
+  # Base de données PostgreSQL
+  postgres:
+    image: postgres:15-alpine
+    container_name: comptanova-db
+    environment:
+      POSTGRES_DB: comptanova
+      POSTGRES_USER: comptanova_user
+      POSTGRES_PASSWORD: comptanova_pass
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./init-scripts:/docker-entrypoint-initdb.d
+    networks:
+      - comptanova-network
+
+  # Application Spring Boot
+  backend:
+    build: 
+      context: .
+      dockerfile: Dockerfile
+    container_name: comptanova-backend
+    depends_on:
+      - postgres
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/comptanova
+      SPRING_DATASOURCE_USERNAME: comptanova_user
+      SPRING_DATASOURCE_PASSWORD: comptanova_pass
+      JWT_SECRET: mySecretKey
+      JWT_EXPIRATION: 86400000
+    ports:
+      - "8080:8080"
+    networks:
+      - comptanova-network
+    restart: unless-stopped
+
+  # Frontend React (optionnel, pour production)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: comptanova-frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+    networks:
+      - comptanova-network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+
+networks:
+  comptanova-network:
+    driver: bridge
+```
+
+```dockerfile
+# Dockerfile pour Spring Boot
+FROM openjdk:17-jdk-slim
+
+WORKDIR /app
+
+COPY target/comptanova-*.jar app.jar
+
+EXPOSE 8080
+
+ENTRYPOINT ["java", "-jar", "app.jar"]
+```
+
+### Scripts d'initialisation des plans comptables
+```sql
+-- init-scripts/01-account-types.sql
+INSERT INTO account_types (code, name, description, accounting_system) VALUES
+-- Types France
+('ACTIF', 'Actif', 'Comptes d''actif du bilan', 'PCG_FRANCE'),
+('PASSIF', 'Passif', 'Comptes de passif du bilan', 'PCG_FRANCE'),
+('CHARGE', 'Charge', 'Comptes de charges', 'PCG_FRANCE'),
+('PRODUIT', 'Produit', 'Comptes de produits', 'PCG_FRANCE'),
+
+-- Types Tunisie
+('ACTIF', 'Actif', 'Comptes d''actif du bilan', 'SYSCOA_TUNISIA'),
+('PASSIF', 'Passif', 'Comptes de passif du bilan', 'SYSCOA_TUNISIA'),
+('CHARGE', 'Charge', 'Comptes de charges', 'SYSCOA_TUNISIA'),
+('PRODUIT', 'Produit', 'Comptes de produits', 'SYSCOA_TUNISIA');
+
+-- init-scripts/02-chart-accounts-france.sql
+-- Plan comptable français de base
+-- Classe 1 - Capitaux propres
+-- Classe 2 - Immobilisations
+-- Classe 3 - Stocks
+-- Classe 4 - Tiers
+-- Classe 5 - Financiers
+-- Classe 6 - Charges
+-- Classe 7 - Produits
+
+-- init-scripts/03-chart-accounts-tunisia.sql
+-- Plan comptable tunisien de base selon SCE
+-- Classe 1 - Capitaux propres
+-- Classe 2 - Immobilisations
+-- Classe 3 - Stocks
+-- Classe 4 - Tiers
+-- Classe 5 - Financiers
+-- Classe 6 - Charges
+-- Classe 7 - Produits
+-- Classe 8 - Résultats
+-- Classe 9 - Hors bilan
+```
+
+Cette architecture distingue clairement :
+- **Entités persistées** : User, Company, Account, JournalEntry, etc.
+- **Vues/DTOs calculées** : TrialBalanceItem, ProfitLossItem, BalanceSheetItem, AccountEntry
+- **Extensions logiques** : SystemUser comme extension de User avec des données calculées
+- **Compatibilité France/Tunisie** : Via AccountingSystem enum et configuration par pays

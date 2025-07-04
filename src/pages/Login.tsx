@@ -1,52 +1,66 @@
 
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Checkbox } from "@/components/ui/checkbox";
+import { useNavigate } from "react-router-dom";
 import { ArrowLeft } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
 
-export default function Login() {
+const Login = () => {
   const navigate = useNavigate();
   const [formData, setFormData] = useState({
     email: "",
     password: "",
-    rememberMe: false,
+    rememberMe: false
   });
+
+  const handleInputChange = (field: string, value: string | boolean) => {
+    setFormData(prev => ({
+      ...prev,
+      [field]: value
+    }));
+  };
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    console.log("Login data:", formData);
-    navigate("/dashboard");
+    console.log("Connexion:", formData);
+    // Simulate successful login
+    navigate('/dashboard');
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
+    <div className="min-h-screen bg-gradient-to-br from-blue-50 via-white to-indigo-50 flex items-center justify-center py-8 px-4">
       <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <Link to="/" className="inline-flex items-center gap-2 text-primary hover:text-primary-600 mb-4">
-            <ArrowLeft className="h-4 w-4" />
+        <div className="mb-8">
+          <Button
+            variant="ghost"
+            onClick={() => navigate('/')}
+            className="mb-6"
+          >
+            <ArrowLeft className="h-4 w-4 mr-2" />
             Retour à l'accueil
-          </Link>
-          <div className="flex items-center justify-center gap-2 mb-4">
-            <div className="h-10 w-10 bg-primary rounded-lg flex items-center justify-center">
-              <span className="text-white font-bold">CN</span>
+          </Button>
+          
+          <div className="text-center">
+            <div className="flex items-center justify-center space-x-2 mb-4">
+              <div className="w-10 h-10 bg-blue-600 rounded-lg flex items-center justify-center">
+                <span className="text-white font-bold">CN</span>
+              </div>
+              <h1 className="text-2xl font-bold">ComptaNova</h1>
             </div>
-            <span className="text-2xl font-bold text-gray-900">ComptaNova</span>
           </div>
-          <h1 className="text-2xl font-bold text-gray-900">Bon retour !</h1>
-          <p className="text-gray-600">Connectez-vous à votre compte</p>
         </div>
 
         <Card>
-          <CardHeader>
+          <CardHeader className="text-center">
             <CardTitle>Connexion</CardTitle>
             <CardDescription>
               Accédez à votre tableau de bord comptable
             </CardDescription>
           </CardHeader>
+          
           <CardContent>
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -55,7 +69,8 @@ export default function Login() {
                   id="email"
                   type="email"
                   value={formData.email}
-                  onChange={(e) => setFormData(prev => ({ ...prev, email: e.target.value }))}
+                  onChange={(e) => handleInputChange('email', e.target.value)}
+                  placeholder="votre-email@entreprise.com"
                   required
                 />
               </div>
@@ -66,41 +81,52 @@ export default function Login() {
                   id="password"
                   type="password"
                   value={formData.password}
-                  onChange={(e) => setFormData(prev => ({ ...prev, password: e.target.value }))}
+                  onChange={(e) => handleInputChange('password', e.target.value)}
                   required
                 />
               </div>
-
+              
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-2">
                   <Checkbox
                     id="rememberMe"
                     checked={formData.rememberMe}
-                    onCheckedChange={(checked) => setFormData(prev => ({ ...prev, rememberMe: checked as boolean }))}
+                    onCheckedChange={(checked) => handleInputChange('rememberMe', checked as boolean)}
                   />
                   <Label htmlFor="rememberMe" className="text-sm">
                     Se souvenir de moi
                   </Label>
                 </div>
-                <Link to="/forgot-password" className="text-sm text-primary hover:underline">
-                  Mot de passe oublié ?
-                </Link>
+                
+                <button
+                  type="button"
+                  className="text-sm text-blue-600 hover:underline"
+                >
+                  Mot de passe oublié?
+                </button>
               </div>
-
-              <Button type="submit" className="w-full">
+              
+              <Button type="submit" className="w-full" size="lg">
                 Se connecter
               </Button>
             </form>
+            
+            <div className="text-center mt-6">
+              <p className="text-sm text-gray-600">
+                Pas encore de compte?{" "}
+                <button
+                  onClick={() => navigate('/signup')}
+                  className="text-blue-600 hover:underline"
+                >
+                  Créer un compte
+                </button>
+              </p>
+            </div>
           </CardContent>
         </Card>
-
-        <p className="text-center text-sm text-gray-600 mt-4">
-          Pas encore de compte ?{" "}
-          <Link to="/register" className="text-primary hover:underline">
-            Créer un compte gratuit
-          </Link>
-        </p>
       </div>
     </div>
   );
-}
+};
+
+export default Login;

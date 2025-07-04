@@ -1,0 +1,55 @@
+services:
+  postgres:
+    image: postgres:15
+    container_name: comptanova_db
+    environment:
+      POSTGRES_DB: comptanova_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - comptanova_network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: .
+    container_name: comptanova_backend
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5434/comptanova_db
+      SPRING_DATASOURCE_USERNAME: postgres
+      SPRING_DATASOURCE_PASSWORD: postgres
+    ports:
+      - "8084:8083"
+    networks:
+      - comptanova_network
+
+  pgadmin:
+    image: dpage/pgadmin4
+    container_name: comptanova_pgadmin
+    environment:
+      PGADMIN_DEFAULT_EMAIL: admin@admin.com
+      PGADMIN_DEFAULT_PASSWORD: admin
+    ports:
+      - "8085:80"
+    depends_on:
+      - postgres
+    networks:
+      - comptanova_network
+
+volumes:
+  postgres_data:
+
+networks:
+  comptanova_network:
+    driver: bridge
